@@ -1,0 +1,8 @@
+Linux
+=====
+
+make CC=gcc
+
+or
+
+make CC=clang

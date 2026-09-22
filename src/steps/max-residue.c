@@ -1,0 +1,95 @@
+/*
+ * http://www.ericr.nl/wondrous/
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <assert.h>
+#include <limits.h>
+#include <unistd.h>
+#include <stdint.h>
+#include <inttypes.h>
+#include <math.h>
+
+#include "wideint.h"
+#include "compat.h"
+
+#define REACH_ONE 1
+#define START_VALUE 1
+#define INCREMENT 1
+
+#define LUT_SIZE64 41
+
+uint64_t g_lut64[LUT_SIZE64];
+
+void init_lut()
+{
+	int a;
+
+	for (a = 0; a < LUT_SIZE64; ++a) {
+		g_lut64[a] = pow3u64((uint64_t)a);
+	}
+}
+
+double check(uint128_t n)
+{
+#if (REACH_ONE == 0)
+	uint128_t n0 = n;
+#endif
+	uint64_t odd_steps = 0, even_steps = 0;
+	int alpha, beta;
+
+	assert(n != UINT128_MAX);
+
+#if (REACH_ONE == 0)
+	while (n >= n0 && n != 1) {
+#else
+	while (n != 1) {
+#endif
+		n++;
+
+		alpha = ctzu64(n);
+
+		if (alpha >= LUT_SIZE64) {
+			alpha = LUT_SIZE64 - 1;
+		}
+
+		odd_steps += alpha;
+
+		n >>= alpha;
+
+		assert(n <= UINT128_MAX >> 2*alpha);
+
+		n *= g_lut64[alpha];
+
+		n--;
+
+		beta = ctzu64(n);
+
+		even_steps += beta;
+
+		n >>= beta;
+	}
+
+	return pow(2., (double)(odd_steps + even_steps)) / pow(3., (double)odd_steps);
+}
+
+int main()
+{
+	uint128_t n = START_VALUE;
+	double res, max_res = 0.;
+
+	setvbuf(stdout, NULL, _IONBF, BUFSIZ);
+
+	init_lut();
+
+	for (;; n += INCREMENT) {
+		res = check(n) / (double)n;
+
+		if (res == res && (res > max_res || n == START_VALUE)) {
+			max_res = res;
+			printf("%" PRIu64 " (%f), ", (uint64_t)n, max_res);
+		}
+	}
+
+	return 0;
+}

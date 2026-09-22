@@ -1,0 +1,16 @@
+name: deployment-ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  cpu-and-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libgmp-dev ocl-icd-opencl-dev
+      - run: make -C src/worker clean all CC=gcc USE_LIBGMP=1
+      - run: make -C src/gpuworker clean all CC=gcc SIEVE_LOGSIZE=24 USE_SIEVE3=1
+      - run: make -C src/mclient clean all CC=gcc
+      - run: bash tests/test_deployment.sh
