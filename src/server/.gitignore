@@ -1,0 +1,10 @@
+server
+chk-tool
+verify-result
+find-maxima
+max-report
+*~
+*.gcda
+*.map
+*.log
+*.dat

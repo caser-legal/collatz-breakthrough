@@ -1,0 +1,4 @@
+Linux
+=====
+
+make CC=gcc

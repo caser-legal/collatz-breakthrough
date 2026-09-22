@@ -1,0 +1,8 @@
+worker
+
+*.map
+
+*~
+*.gcda
+*.txt
+*.pdf

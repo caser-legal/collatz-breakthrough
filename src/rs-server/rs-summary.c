@@ -1,0 +1,230 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <inttypes.h>
+#ifdef _USE_GMP
+#	include <gmp.h>
+#endif
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
+#include <math.h>
+#include "wideint.h"
+#include "compat.h"
+
+#include <assert.h>
+
+#include "rs-config.h"
+
+#define ASSIGNMENTS_NO (UINT64_C(1) << (LOG2_NO_PROCS))
+
+#define RECORDS_SIZE (ASSIGNMENTS_NO * 8)
+
+uint128_t g_pow3[64];
+
+uint128_t pow3u128(uint128_t n)
+{
+	uint128_t r = 1;
+	uint128_t b = 3;
+
+	while (n) {
+		if (n & 1) {
+			assert(r <= UINT128_MAX / b);
+			r *= b;
+		}
+
+		assert(b <= UINT128_MAX / b);
+		b *= b;
+
+		n >>= 1;
+	}
+
+	return r;
+}
+
+void pow3_init(void)
+{
+	int i = 0;
+	for (; i < 64; ++i) {
+		g_pow3[i] = pow3u128(i);
+	}
+}
+
+void print(uint128_t n)
+{
+	char buff[40];
+	char r_buff[40];
+
+	char *ptr = buff;
+
+	int i = 0;
+
+	while (n != 0) {
+		*(ptr++) = '0' + n % 10;
+		n /= 10;
+	}
+
+	*ptr = 0;
+
+	ptr--;
+
+	while (ptr >= buff) {
+		r_buff[i++] = *(ptr--);
+	}
+
+	r_buff[i] = 0;
+
+	puts(r_buff);
+}
+
+const uint64_t *open_records(const char *path)
+{
+	int fd = open(path, O_RDONLY, 0600);
+	const void *ptr;
+
+	if (fd < 0) {
+		perror("open");
+		abort();
+	}
+
+	ptr = mmap(NULL, (size_t)RECORDS_SIZE, PROT_READ, MAP_SHARED, fd, 0);
+
+	if (ptr == MAP_FAILED) {
+		perror("mmap");
+		abort();
+	}
+
+	close(fd);
+
+	return (const uint64_t *)ptr;
+}
+
+const uint64_t *g_checksums = 0;
+const uint64_t *g_usertimes = 0;
+const uint64_t *g_overflows = 0;
+
+#ifdef _USE_GMP
+void mpz_init_set_u128(mpz_t rop, uint128_t op)
+{
+	uint64_t nh = (uint64_t)(op >> 64);
+	uint64_t nl = (uint64_t)(op);
+
+	assert(sizeof(unsigned long) == sizeof(uint64_t));
+
+	mpz_init_set_ui(rop, (unsigned long)nh);
+	mpz_mul_2exp(rop, rop, (mp_bitcnt_t)64);
+	mpz_add_ui(rop, rop, (unsigned long)nl);
+}
+#endif
+
+/*int argc, char *argv[]*/
+int main(void)
+{
+	uint64_t task_id;
+	uint64_t checksum = 0;
+	uint64_t usertime = 0;
+	uint64_t overflow = 0;
+	int complete = 1;
+	uint64_t num_complete = 0;
+	uint64_t num_time = 0;
+	uint64_t hours;
+	uint64_t days;
+	uint64_t years;
+
+	pow3_init();
+
+	printf("TARGET = %i\n", TARGET);
+	printf("ASSIGNMENTS_NO = %" PRIu64 "\n", ASSIGNMENTS_NO);
+	printf("LOG2_NO_PROCS = %i\n", LOG2_NO_PROCS);
+
+	g_checksums = open_records("checksums.dat");
+	g_usertimes = open_records("usertimes.dat");
+	g_overflows = open_records("overflows.dat");
+
+	for (task_id = 0; task_id < ASSIGNMENTS_NO; ++task_id) {
+		uint64_t checksum_ = g_checksums[task_id];
+		uint64_t usertime_ = g_usertimes[task_id];
+		uint64_t overflow_ = g_overflows[task_id];
+
+		checksum += checksum_;
+		usertime += usertime_;
+		overflow += overflow_;
+
+		if (!checksum_) {
+			complete = 0;
+		} else {
+			num_complete++;
+		}
+
+		if (usertime_) {
+			num_time++;
+		}
+	}
+
+	printf("OLD LIMIT (all numbers below this must be already verified) ");
+	print(4 * g_pow3[TARGET + 0] + 2);
+
+	printf("NEW LIMIT (all numbers below this are now verified) ");
+	print(4 * g_pow3[TARGET + 1] + 2);
+#ifdef _USE_GMP
+	{
+		mpz_t x;
+		double log_x;
+		signed long int ex;
+		double di;
+		int exp;
+		mpf_t res, mpf_x;
+
+		mpz_init_set_u128(x, 4 * g_pow3[TARGET + 1] + 2);
+
+		di = mpz_get_d_2exp(&ex, x);
+		log_x = log(di) + log(2) * (double)ex;
+
+		exp = (int)floor(log_x / log(2));
+
+		mpf_init(res);
+		mpf_init(mpf_x);
+		mpf_set_z(mpf_x, x);
+
+		mpf_div_2exp(res, mpf_x, exp);
+
+		gmp_printf("NEW LIMIT EXP %Ff * 2^{%i}\n", res, exp);
+
+		mpz_clear(x);
+		mpf_clear(res);
+		mpf_clear(mpf_x);
+	}
+#endif
+
+	printf("TOTAL CHECKSUM %" PRIu64 "\n", checksum);
+	printf("TOTAL TIME %" PRIu64 " ms\n", usertime);
+
+	hours = (usertime + 500)/1000/60/60;
+	days = hours/24%365;
+	years = hours/24/365;
+	printf("TOTAL TIME %" PRIu64 " secs (%" PRIu64 "y %" PRIu64 "d %" PRIu64 ":%02" PRIu64 ":%02" PRIu64 ")\n",
+		(usertime + 500)/1000,
+		years,
+		days,
+		(usertime + 500)/1000/60/60%24, /* hrs */
+		(usertime + 500)/1000/60%60, /* mins */
+		(usertime + 500)/1000%60); /* secs */
+
+	if (num_time != 0) {
+		printf("avg. time: %f secs (%" PRIu64 ":%02" PRIu64 ":%02" PRIu64 ")\n",
+			usertime / (double)num_time / 1000,
+			(usertime + 500)/1000/num_time/60/60, /* hrs */
+			(usertime + 500)/1000/num_time/60%60, /* mins */
+			(usertime + 500)/1000/num_time%60 /* secs */
+		);
+	}
+
+	printf("overflows: %" PRIu64 "\n", overflow);
+
+	printf("all assignments are complete: %s\n", complete ? "yes" : "no");
+	printf("number of completed assignments: %" PRIu64 "\n", num_complete);
+
+	return 0;
+}
