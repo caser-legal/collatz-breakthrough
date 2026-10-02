@@ -7,7 +7,7 @@
 #PBS -l select=1:ncpus=1:mem=2gb:scratch_local=1gb,walltime=4:00:00
 #PBS -R eo
 
-HOME=${HOME:-$PWD}
+HOME="${HOME:-$PWD}"
 
 TMPDIR=$SCRATCHDIR
 
